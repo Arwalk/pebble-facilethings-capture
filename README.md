@@ -20,10 +20,16 @@ FacileThings v2 has no static API key. It supports `authorization_code` and
 `refresh_token` only, with PKCE S256. The config page runs that flow once and
 stores the result on the phone.
 
-1. Publish `docs/` with GitHub Pages.
-2. Register that exact page URL as a `redirect_uri` on your FacileThings OAuth
-   client. Doorkeeper matches it exactly. The page prints the URI it needs.
-3. Set `PAGE_URL` in `capture/src/pkjs/config.js` to the same URL.
+1. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
+   The page is then served at
+
+       https://arwalk.github.io/pebble-facilethings-capture/
+
+2. Register that exact string as a `redirect_uri` on your FacileThings OAuth
+   client. Doorkeeper matches it exactly, and the host is lowercase. The page
+   also prints the URI it needs, so open it once if in doubt.
+3. `PAGE_URL` in `capture/src/pkjs/config.js` already holds that URL. Change it
+   only if you host the page elsewhere.
 4. On the phone, open the app's settings, enter client id and secret, and
    authorize. Tokens are stored on the phone and never reach the watch.
 

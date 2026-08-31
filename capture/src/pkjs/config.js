@@ -2,7 +2,7 @@
 // dictation knowledge. The credential is never logged.
 
 // Must match a redirect_uri registered on the FacileThings OAuth client, exactly.
-var PAGE_URL = 'https://YOUR-GITHUB-USERNAME.github.io/pebble-facilethings-capture/';
+var PAGE_URL = 'https://arwalk.github.io/pebble-facilethings-capture/';
 
 var KEY_CONFIG = 'ft_config';
 var KEY_SEEN = 'ft_seen';

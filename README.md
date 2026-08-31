@@ -43,8 +43,10 @@ To see which one your client accepts:
 python3 tools/ft_auth.py --client-id <ID> --probe
 ```
 
-Log in first, then open each printed URL. The one that shows a consent screen is
-the registered one; the others report an invalid redirect URI.
+Open each printed URL directly. Each sends you to the sign in page and resumes
+after. Do not visit `/oauth/login` on its own; it has no pending request and
+fails with `missing_param`. The URL that reaches a consent screen carries the
+registered redirect URI; the others report an invalid one.
 
 If it is loopback or out-of-band, skip the hosted page entirely:
 

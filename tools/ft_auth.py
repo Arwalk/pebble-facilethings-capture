@@ -114,10 +114,11 @@ def wait_for_code():
 def probe(client_id):
     verifier, challenge = make_pkce()
 
-    print('Log in first:      %s/oauth/login' % BASE)
-    print('Then open each URL below. One will show a consent screen; the rest')
-    print('will say the redirect uri is not valid. The one that works is the')
-    print('redirect uri registered on your client.\n')
+    print('Open each URL below directly. Each one sends you to the sign in')
+    print('page and resumes afterwards; do not visit /oauth/login on its own,')
+    print('it has no pending request and errors with missing_param.\n')
+    print('One URL reaches a consent screen: that redirect uri is the one')
+    print('registered on your client. The others report an invalid redirect uri.\n')
 
     for name, uri in (('loopback', LOOPBACK_URI),
                       ('out of band', OOB_URI),

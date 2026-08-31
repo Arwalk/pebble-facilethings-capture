@@ -7,6 +7,7 @@ var config = require('./config');
 var BASE = 'https://api2.facilethings.com';
 var CAPTURE_PATH = '/v2/stuff';
 var TOKEN_PATH = '/oauth/token';
+var REVOKE_PATH = '/oauth/revoke';
 
 // Refresh a little early so a request never rides an expiring token.
 var EXPIRY_SKEW_MS = 60000;
@@ -89,8 +90,33 @@ function capture(text, cb) {
   attempt(text, true, cb);
 }
 
+// Revoking the refresh token drops the whole grant server side. The local copy
+// is forgotten either way: the user asked to disconnect, so the app must not
+// keep capturing to their account even if the revoke call could not be made.
+function disconnect(cb) {
+  var cfg = config.get();
+
+  if (!cfg || !cfg.refresh_token) {
+    config.clear();
+    return cb(null);
+  }
+
+  var params = { token: cfg.refresh_token, token_type_hint: 'refresh_token', client_id: cfg.client_id };
+  if (cfg.client_secret) params.client_secret = cfg.client_secret;
+
+  http.post_form(BASE + REVOKE_PATH, params, function(err, res) {
+    config.clear();
+
+    if (err) return cb(Kind_Transport);
+    if (res.status !== http.HTTP_OK) return cb(Kind_Api);
+
+    cb(null);
+  });
+}
+
 module.exports = {
   capture: capture,
+  disconnect: disconnect,
   Kind_Transport: Kind_Transport,
   Kind_Auth: Kind_Auth,
   Kind_Api: Kind_Api,

@@ -86,17 +86,22 @@ function show_error(message, detail) {
   var again = el('button', 'Start over');
   again.onclick = function() { location.replace(REDIRECT_URI); };
 
-  app.textContent = '';
-  app.appendChild(el('h1', 'Setup failed'));
+  render('Setup failed', null);
   app.appendChild(box);
   app.appendChild(again);
 }
 
-function finish(data) {
+function render(heading, message, cls) {
+  app.textContent = '';
+  app.appendChild(el('h1', heading));
+
+  if (message) app.appendChild(el('div', message, 'msg ' + (cls || 'info')));
+}
+
+function finish(data, heading) {
   location.replace('pebblejs://close#' + encodeURIComponent(JSON.stringify(data)));
 
-  app.innerHTML = '<h1>Connected</h1>'
-    + '<div class="msg info">You can close this page and return to the watch.</div>';
+  render(heading, 'You can close this page and return to the watch.');
 }
 
 // -- step 1: send the user to FacileThings ----------------------------------
@@ -128,11 +133,32 @@ function show_start() {
                       'Set CLIENT_ID in docs/index.html to the id FacileThings issued.');
   }
 
-  app.innerHTML = '<h1>FT Capture</h1>'
-    + '<p>Connect the watchapp to your FacileThings account.</p>'
-    + '<button id="go">Connect FacileThings</button>';
+  // config.js says whether the watchapp already holds a token; it never sends one.
+  if (query('connected') === '1') return show_connected();
 
-  document.getElementById('go').onclick = start;
+  render('FT Capture', null);
+  app.appendChild(el('p', 'Connect the watchapp to your FacileThings account.'));
+
+  var go = el('button', 'Connect FacileThings');
+  go.onclick = start;
+  app.appendChild(go);
+}
+
+// Revoking needs the refresh token, which stays in the watchapp. The page only
+// reports the intent and lets PebbleKit JS make the call.
+function show_connected() {
+  render('FT Capture', 'Signed in.');
+
+  var out = el('button', 'Disconnect');
+  out.onclick = function() {
+    finish({ disconnect: true }, 'Disconnected');
+  };
+
+  var again = el('button', 'Sign in again');
+  again.onclick = start;
+
+  app.appendChild(out);
+  app.appendChild(again);
 }
 
 // -- step 2: exchange the code ----------------------------------------------
@@ -148,7 +174,7 @@ function exchange(code, state) {
   if (!pending) return show_error('Setup was interrupted. Start again.');
   if (pending.state !== state) return show_error('State mismatch. Start again.');
 
-  app.innerHTML = '<h1>Connecting…</h1>';
+  render('Connecting…', null);
 
   // No client_secret: this is a public client and PKCE proves the exchange.
   fetch(TOKEN, {
@@ -176,7 +202,7 @@ function exchange(code, state) {
       refresh_token: res.body.refresh_token,
       access_token: res.body.access_token,
       expires_at: Date.now() + (res.body.expires_in || 0) * 1000
-    });
+    }, 'Connected');
   }).catch(function() {
     sessionStorage.removeItem(STASH);
     show_error('Could not reach FacileThings.');

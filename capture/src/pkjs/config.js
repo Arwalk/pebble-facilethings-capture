@@ -56,22 +56,28 @@ function remember(id) {
   localStorage.setItem(KEY_SEEN, JSON.stringify(ids.slice(-SEEN_MAX)));
 }
 
+// Tells the page whether to offer Connect or Disconnect. No token is passed.
 function open_page() {
-  Pebble.openURL(PAGE_URL);
+  var cfg = get();
+  var connected = !!(cfg && cfg.refresh_token);
+
+  Pebble.openURL(PAGE_URL + (connected ? '?connected=1' : ''));
 }
 
-// The page returns the whole credential set through the close URL.
-function save_from_webview(response) {
-  if (!response) return;
+// Parsed, not acted on: index.js decides whether this is a sign in or a
+// disconnect. Returns null when there is nothing usable.
+function read_webview(response) {
+  if (!response) return null;
 
-  var data;
   try {
-    data = JSON.parse(decodeURIComponent(response));
+    return JSON.parse(decodeURIComponent(response));
   } catch (e) {
     console.log('config: unreadable response');
-    return;
+    return null;
   }
+}
 
+function save(data) {
   if (!data.client_id || !data.refresh_token) {
     console.log('config: incomplete, not saved');
     return;
@@ -87,12 +93,22 @@ function save_from_webview(response) {
   console.log('config: saved');
 }
 
+// Forgets the account: tokens and the captured-id history alike.
+function clear() {
+  localStorage.removeItem(KEY_CONFIG);
+  localStorage.removeItem(KEY_SEEN);
+
+  console.log('config: cleared');
+}
+
 module.exports = {
   get: get,
   update: update,
   seen: seen,
   remember: remember,
   open_page: open_page,
-  save_from_webview: save_from_webview,
+  read_webview: read_webview,
+  save: save,
+  clear: clear,
   PAGE_URL: PAGE_URL
 };

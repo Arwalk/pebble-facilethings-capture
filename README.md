@@ -11,6 +11,8 @@ capture/            watchapp
   src/c/            ui -> capture -> msg (AppMessage driver)
   src/pkjs/         index -> ft_client -> {http, config}
   test/run.js       pkjs tests against stubbed XHR/localStorage/Pebble
+  test/config_page.js  config page tests against a DOM stub
+docs/index.html     hosted sign in page (GitHub Pages)
 tools/ft_auth.py    one-shot sign in, prints a refresh token
 ```
 
@@ -30,6 +32,11 @@ client: there is no client secret, and PKCE is what replaces it.
    registered redirect URI, exactly.
 4. On the phone: app settings > **Connect FacileThings** > sign in. That is the
    whole setup for a user.
+
+To sign out, open the settings again and press **Disconnect**. It revokes the
+refresh token at `/oauth/revoke` and forgets the account, including the
+captured-id history. The local copy is dropped even if the revoke call fails, so
+a disconnect is never left half done.
 
 Tokens live in phone localStorage and never reach the watch. Nothing is typed by
 hand and no secret exists to leak.
@@ -51,6 +58,7 @@ uv tool install pebble-tool
 pebble sdk install latest
 cd capture && pebble build
 node test/run.js
+node test/config_page.js
 ```
 
 ## Behaviour

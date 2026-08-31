@@ -51,5 +51,12 @@ Pebble.addEventListener('showConfiguration', function() {
 });
 
 Pebble.addEventListener('webviewclosed', function(e) {
-  config.save_from_webview(e.response);
+  var data = config.read_webview(e.response);
+  if (!data) return;
+
+  if (!data.disconnect) return config.save(data);
+
+  ft.disconnect(function(kind) {
+    console.log(kind ? 'disconnect: revoke failed, forgotten locally' : 'disconnect: revoked');
+  });
 });

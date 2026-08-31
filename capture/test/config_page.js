@@ -37,7 +37,7 @@ function walk(root, seen) {
   return seen;
 }
 
-function load_page() {
+function load_page(search) {
   var html = fs.readFileSync(PAGE, 'utf8');
   var script = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
 
@@ -47,8 +47,8 @@ function load_page() {
       getElementById: function(id) { return id === 'app' ? app : node('input'); },
       createElement: node
     },
-    location: { origin: 'https://example.test', pathname: '/p/', search: '',
-                replace: function() {}, assign: function() {} },
+    location: { origin: 'https://example.test', pathname: '/p/', search: search || '',
+                replace: function(u) { sandbox.replaced = u; }, assign: function() {} },
     sessionStorage: { getItem: function() { return null; }, setItem: function() {},
                       removeItem: function() {} },
     crypto: { getRandomValues: function(a) { return a; },
@@ -103,6 +103,60 @@ test('the page never concatenates a detail into an HTML string', function() {
     assert.ok(line.indexOf('+') === -1 || /'[^']*'\s*$/.test(line.trim()),
               'line ' + (i + 1) + ' builds innerHTML by concatenation: ' + line.trim());
   });
+});
+
+function find_button(root, label) {
+  if (root.tagName === 'button' && root.text === label) return root;
+
+  for (var i = 0; i < root.children.length; i++) {
+    var hit = find_button(root.children[i], label);
+    if (hit) return hit;
+  }
+
+  return null;
+}
+
+// The page refuses to start while CLIENT_ID is the placeholder, so give it one
+// and render again.
+function rendered(search) {
+  var page = load_page(search);
+
+  page.sandbox.CLIENT_ID = 'test-client-id';
+  page.sandbox.show_start();
+
+  return page;
+}
+
+test('the placeholder client id stops the flow', function() {
+  var page = load_page('');
+
+  assert.ok(!find_button(page.app, 'Connect FacileThings'),
+            'must not offer sign in before a client id is set');
+  assert.ok(walk(page.app).text.join(' ').indexOf('client id') !== -1,
+            'should say what is missing');
+});
+
+test('a connected page offers Disconnect and reports only the intent', function() {
+  var page = rendered('?connected=1');
+
+  var out = find_button(page.app, 'Disconnect');
+  assert.ok(out, 'Disconnect button should be shown when connected=1');
+
+  out.onclick();
+
+  var url = page.sandbox.replaced;
+  assert.ok(/^pebblejs:\/\/close#/.test(url), 'must close back into the app: ' + url);
+
+  var data = JSON.parse(decodeURIComponent(url.replace('pebblejs://close#', '')));
+  assert.strictEqual(data.disconnect, true);
+  assert.deepStrictEqual(Object.keys(data), ['disconnect'], 'must carry nothing else');
+});
+
+test('a fresh page offers Connect, not Disconnect', function() {
+  var page = rendered('');
+
+  assert.ok(find_button(page.app, 'Connect FacileThings'), 'Connect should be shown');
+  assert.ok(!find_button(page.app, 'Disconnect'), 'Disconnect must not be shown');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

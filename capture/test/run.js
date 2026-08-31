@@ -363,6 +363,62 @@ test('a public client captures without sending a secret', function() {
   assert.ok(!('client_secret' in form), 'must not send client_secret: ' + requests[0].body);
 });
 
+test('disconnect revokes the refresh token and forgets it', function() {
+  reset_globals(function() { return { status: 200, body: {} }; });
+  var config = seed({ client_id: 'cid-1', refresh_token: REFRESH, access_token: ACCESS });
+  load('index');
+
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify({ disconnect: true })) });
+
+  assert.strictEqual(requests.length, 1, 'expected one revoke call');
+  assert.strictEqual(requests[0].url, 'https://api2.facilethings.com/oauth/revoke');
+
+  var form = form_of(requests[0]);
+  assert.strictEqual(form.token, REFRESH);
+  assert.strictEqual(form.token_type_hint, 'refresh_token');
+  assert.ok(!('client_secret' in form), 'public client sends no secret');
+
+  assert.strictEqual(config.get(), null, 'credential must be gone');
+});
+
+test('disconnect forgets the token even when revoke fails', function() {
+  reset_globals(function() { return { network: true }; });
+  var config = seed({ client_id: 'cid-1', refresh_token: REFRESH });
+  load('index');
+
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify({ disconnect: true })) });
+
+  assert.strictEqual(config.get(), null,
+                     'an unreachable server must not leave the account connected');
+});
+
+test('disconnect clears the captured-id history', function() {
+  reset_globals(function() { return { status: 200, body: {} }; });
+  var config = seed({ client_id: 'cid-1', refresh_token: REFRESH });
+  config.remember(7);
+  load('index');
+
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify({ disconnect: true })) });
+
+  assert.ok(!config.seen(7), 'ids from the old account must not persist');
+});
+
+test('the page is told whether an account is connected', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  load('index');
+
+  Pebble.fire('showConfiguration', {});
+  assert.ok(sent[0].openURL.indexOf('connected=1') === -1, 'fresh install offers Connect');
+
+  reset_globals(function() { return { status: 201, body: {} }; });
+  seed({ client_id: 'cid-1', refresh_token: REFRESH });
+  load('index');
+
+  Pebble.fire('showConfiguration', {});
+  assert.ok(sent[0].openURL.indexOf('connected=1') !== -1, 'configured install offers Disconnect');
+  assert.ok(sent[0].openURL.indexOf(REFRESH) === -1, 'no token may appear in the page URL');
+});
+
 test('an incomplete webview response is rejected', function() {
   reset_globals(function() { return { status: 201, body: {} }; });
   load('index');

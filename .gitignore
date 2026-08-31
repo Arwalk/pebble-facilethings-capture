@@ -2,3 +2,5 @@ capture/build/
 capture/.lock-waf*
 node_modules/
 *.pbw
+__pycache__/
+*.pyc

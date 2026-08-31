@@ -1,0 +1,374 @@
+// Exercises the pkjs layers against stubbed XMLHttpRequest / localStorage / Pebble.
+// The emulator cannot run here (stpyv8 has no linux-aarch64 wheel), so this is the
+// gate for the phone side.
+
+var assert = require('assert');
+var path = require('path');
+
+var PKJS = path.join(__dirname, '..', 'src', 'pkjs');
+
+var SECRET = 'sekret-value';
+var REFRESH = 'refresh-1';
+var ACCESS = 'access-1';
+
+var requests, logs, sent;
+
+// Kept before the stub replaces global.console.
+var report = console.log.bind(console);
+
+function reset_globals(responder) {
+  requests = [];
+  logs = [];
+  sent = [];
+
+  var store = {};
+  global.localStorage = {
+    getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+    setItem: function(k, v) { store[k] = String(v); },
+    removeItem: function(k) { delete store[k]; }
+  };
+
+  global.console = { log: function(m) { logs.push(String(m)); } };
+
+  global.Pebble = {
+    addEventListener: function(name, fn) { (global.Pebble._h[name] = global.Pebble._h[name] || []).push(fn); },
+    sendAppMessage: function(msg) { sent.push(msg); },
+    openURL: function(url) { sent.push({ openURL: url }); },
+    _h: {},
+    fire: function(name, e) { (global.Pebble._h[name] || []).forEach(function(fn) { fn(e); }); }
+  };
+
+  global.XMLHttpRequest = function() {
+    var self = this;
+    self._headers = {};
+
+    self.open = function(method, url) { self._method = method; self._url = url; };
+    self.setRequestHeader = function(k, v) { self._headers[k] = v; };
+
+    self.send = function(body) {
+      var req = { method: self._method, url: self._url, headers: self._headers, body: body };
+      requests.push(req);
+
+      var res = responder(req, requests.length - 1);
+
+      if (res.network) return self.onerror();
+      if (res.timeout) return self.ontimeout();
+
+      self.status = res.status;
+      self.responseText = JSON.stringify(res.body === undefined ? {} : res.body);
+      self.onload();
+    };
+  };
+
+  // Fresh module state per case.
+  ['http', 'config', 'ft_client', 'index'].forEach(function(m) {
+    delete require.cache[require.resolve(path.join(PKJS, m + '.js'))];
+  });
+}
+
+function load(name) { return require(path.join(PKJS, name + '.js')); }
+
+function seed(cfg) {
+  var config = load('config');
+  config.update(cfg);
+  return config;
+}
+
+function full_config(over) {
+  var cfg = {
+    client_id: 'cid-1',
+    client_secret: SECRET,
+    refresh_token: REFRESH,
+    access_token: ACCESS,
+    expires_at: Date.now() + 3600000
+  };
+  Object.keys(over || {}).forEach(function(k) { cfg[k] = over[k]; });
+  return cfg;
+}
+
+var passed = 0, failed = 0;
+
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    report('  ok   ' + name);
+  } catch (e) {
+    failed++;
+    report('  FAIL ' + name + '\n       ' + e.message);
+  }
+}
+
+function body_of(req) { return JSON.parse(req.body); }
+
+function form_of(req) {
+  var out = {};
+  req.body.split('&').forEach(function(pair) {
+    var kv = pair.split('=');
+    out[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]);
+  });
+  return out;
+}
+
+// -- ft_client ---------------------------------------------------------------
+
+test('valid token posts once and reports success', function() {
+  reset_globals(function() { return { status: 201, body: { id: 1 } }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('acheter du pain', function(kind) { result = kind; });
+
+  assert.strictEqual(result, null, 'expected success');
+  assert.strictEqual(requests.length, 1, 'expected exactly one request');
+  assert.strictEqual(requests[0].url, 'https://api2.facilethings.com/v2/stuff');
+  assert.strictEqual(requests[0].method, 'POST');
+  assert.strictEqual(requests[0].headers.Authorization, 'Bearer ' + ACCESS);
+  assert.strictEqual(body_of(requests[0]).text, 'acheter du pain');
+});
+
+test('expired token refreshes then posts', function() {
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'access-2', expires_in: 7200 } };
+    }
+    return { status: 201, body: {} };
+  });
+  seed(full_config({ expires_at: Date.now() - 1000 }));
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, null);
+  assert.strictEqual(requests.length, 2);
+
+  var form = form_of(requests[0]);
+  assert.strictEqual(form.grant_type, 'refresh_token');
+  assert.strictEqual(form.refresh_token, REFRESH);
+  assert.strictEqual(form.client_secret, SECRET, 'confidential client must send the secret');
+  assert.strictEqual(requests[1].headers.Authorization, 'Bearer access-2');
+});
+
+test('rotated refresh token is persisted', function() {
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'a2', refresh_token: 'refresh-2', expires_in: 7200 } };
+    }
+    return { status: 201, body: {} };
+  });
+  var config = seed(full_config({ expires_at: 0 }));
+
+  load('ft_client').capture('note', function() {});
+
+  assert.strictEqual(config.get().refresh_token, 'refresh-2', 'rotation must be stored');
+});
+
+test('missing config short-circuits without any request', function() {
+  reset_globals(function() { throw new Error('must not send'); });
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'noconfig');
+  assert.strictEqual(requests.length, 0);
+});
+
+test('refresh rejected maps to auth', function() {
+  reset_globals(function() { return { status: 401, body: { error: 'invalid_grant' } }; });
+  seed(full_config({ expires_at: 0 }));
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'auth');
+});
+
+test('401 on a fresh-looking token refreshes and retries once', function() {
+  var posts = 0;
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'access-3', expires_in: 7200 } };
+    }
+    posts++;
+    return posts === 1 ? { status: 401, body: {} } : { status: 201, body: {} };
+  });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, null, 'retry should succeed');
+  assert.strictEqual(posts, 2, 'exactly one retry');
+});
+
+test('401 twice gives up as auth', function() {
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'a', expires_in: 7200 } };
+    }
+    return { status: 401, body: {} };
+  });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'auth');
+});
+
+test('403 maps to auth', function() {
+  reset_globals(function() { return { status: 403, body: {} }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'auth');
+});
+
+test('500 maps to api', function() {
+  reset_globals(function() { return { status: 500, body: {} }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'api');
+});
+
+test('422 maps to api', function() {
+  reset_globals(function() { return { status: 422, body: { errors: { text: ["can't be blank"] } } }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'api');
+});
+
+test('network failure maps to transport', function() {
+  reset_globals(function() { return { network: true }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'transport');
+});
+
+test('timeout maps to transport', function() {
+  reset_globals(function() { return { timeout: true }; });
+  seed(full_config());
+
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
+
+  assert.strictEqual(result, 'transport');
+});
+
+// -- index.js wire behaviour -------------------------------------------------
+
+test('success acks and remembers the id', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  seed(full_config());
+  load('index');
+
+  Pebble.fire('appmessage', { payload: { Id: 7, Text: 'acheter du pain' } });
+
+  assert.deepStrictEqual(sent, [{ Id: 7, Ack: 1 }]);
+  assert.ok(load('config').seen(7), 'id should be remembered');
+});
+
+test('a repeated id re-acks without posting again', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  seed(full_config());
+  load('index');
+
+  Pebble.fire('appmessage', { payload: { Id: 7, Text: 'acheter du pain' } });
+  var after_first = requests.length;
+
+  Pebble.fire('appmessage', { payload: { Id: 7, Text: 'acheter du pain' } });
+
+  assert.strictEqual(requests.length, after_first, 'must not post twice');
+  assert.deepStrictEqual(sent, [{ Id: 7, Ack: 1 }, { Id: 7, Ack: 1 }]);
+});
+
+test('failures map onto the MsgErr wire codes', function() {
+  var cases = [
+    { responder: function() { return { network: true }; }, cfg: full_config(), code: 1 },
+    { responder: function() { return { status: 401, body: {} }; }, cfg: full_config(), code: 2 },
+    { responder: function() { return { status: 500, body: {} }; }, cfg: full_config(), code: 3 },
+    { responder: function() { return { status: 201, body: {} }; }, cfg: null, code: 4 }
+  ];
+
+  cases.forEach(function(c) {
+    reset_globals(c.responder);
+    if (c.cfg) seed(c.cfg);
+    load('index');
+
+    Pebble.fire('appmessage', { payload: { Id: 9, Text: 'note' } });
+
+    assert.deepStrictEqual(sent, [{ Id: 9, Err: c.code }], 'code ' + c.code);
+  });
+});
+
+test('ready announces itself to the watch', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  load('index');
+
+  Pebble.fire('ready', {});
+
+  assert.deepStrictEqual(sent, [{ Ready: 1 }]);
+});
+
+test('showConfiguration opens the config page', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  load('index');
+
+  Pebble.fire('showConfiguration', {});
+
+  assert.strictEqual(sent.length, 1);
+  assert.ok(/^https:\/\//.test(sent[0].openURL), 'must be an https page: ' + sent[0].openURL);
+});
+
+test('webviewclosed stores the credential set', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  load('index');
+
+  var payload = { client_id: 'cid-1', client_secret: SECRET, refresh_token: REFRESH,
+                  access_token: ACCESS, expires_at: Date.now() + 1000 };
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify(payload)) });
+
+  assert.strictEqual(load('config').get().refresh_token, REFRESH);
+});
+
+test('an incomplete webview response is rejected', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  load('index');
+
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify({ client_id: 'cid-1' })) });
+
+  assert.strictEqual(load('config').get(), null, 'must not store a partial credential');
+});
+
+test('nothing secret reaches the log', function() {
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'a2', refresh_token: 'r2', expires_in: 10 } };
+    }
+    return { status: 201, body: {} };
+  });
+  seed(full_config({ expires_at: 0 }));
+  load('index');
+
+  Pebble.fire('appmessage', { payload: { Id: 3, Text: 'note' } });
+
+  var joined = logs.join('\n');
+  assert.ok(logs.length > 0, 'expected the request line to be logged');
+  [SECRET, REFRESH, ACCESS, 'a2', 'r2'].forEach(function(v) {
+    assert.ok(joined.indexOf(v) === -1, 'leaked ' + v + ' into: ' + joined);
+  });
+});
+
+report('\n' + passed + ' passed, ' + failed + ' failed');
+process.exit(failed ? 1 : 0);

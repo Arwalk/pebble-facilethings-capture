@@ -1,0 +1,19 @@
+{
+  "name": "facilethings-capture",
+  "author": "Arwalk <siragentprovocateurarwalk@gmail.com>",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "FT Capture",
+    "uuid": "29219023-8d0e-47f4-b8cb-279277d2a6aa",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["emery"],
+    "watchapp": { "watchface": false },
+    "capabilities": ["configurable"],
+    "messageKeys": ["Id", "Text", "Ack", "Err", "Ready"],
+    "resources": { "media": [] }
+  }
+}

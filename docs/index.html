@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FT Capture setup</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; background: #fff; color: #111; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 24px; color: #555; font-size: 14px; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; font-size: 14px; }
+  input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 16px;
+          border: 1px solid #bbb; border-radius: 6px; }
+  button { width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; font-weight: 600;
+           border: 0; border-radius: 6px; background: #d43900; color: #fff; }
+  .msg { padding: 12px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+  .err { background: #fdecea; color: #8b1a10; }
+  .info { background: #eef3fb; color: #1a3d6b; }
+  code { font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// FacileThings v2 has no static API key: only authorization_code + refresh_token,
+// PKCE S256. This page runs that flow and hands the tokens back to the watchapp.
+// The client_secret is typed in here, kept only for the round trip, and returned
+// to the phone. It is never written into this page and never logged.
+
+var AUTHORIZE = 'https://api2.facilethings.com/oauth/authorize';
+var TOKEN = 'https://api2.facilethings.com/oauth/token';
+var SCOPE = 'user';
+
+var STASH = 'ft_pending';
+
+// Must match the redirect_uri registered on the FacileThings client, exactly.
+var REDIRECT_URI = location.origin + location.pathname;
+
+var app = document.getElementById('app');
+
+function b64url(bytes) {
+  var s = btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)));
+  return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function random_string() {
+  return b64url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+function challenge(verifier) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(b64url);
+}
+
+function form_body(params) {
+  return Object.keys(params).map(function(name) {
+    return encodeURIComponent(name) + '=' + encodeURIComponent(params[name]);
+  }).join('&');
+}
+
+function query(name) {
+  return new URLSearchParams(location.search).get(name);
+}
+
+function show_error(message, detail) {
+  app.innerHTML = '<h1>Setup failed</h1>'
+    + '<div class="msg err">' + message + (detail ? '<br><code>' + detail + '</code>' : '') + '</div>'
+    + '<button id="again">Start over</button>';
+
+  document.getElementById('again').onclick = function() {
+    location.replace(REDIRECT_URI);
+  };
+}
+
+function finish(data) {
+  // Hand the credential set back to PebbleKit JS and close the webview.
+  location.replace('pebblejs://close#' + encodeURIComponent(JSON.stringify(data)));
+
+  app.innerHTML = '<h1>Connected</h1>'
+    + '<div class="msg info">You can close this page and return to the watch.</div>';
+}
+
+// -- step 1: collect the client and redirect to FacileThings -----------------
+
+function show_form() {
+  app.innerHTML = '<h1>FT Capture</h1>'
+    + '<p class="sub">Connect the watchapp to your FacileThings account.</p>'
+    + '<div class="msg info">Register this exact redirect URI on your OAuth client:'
+    + '<br><code>' + REDIRECT_URI + '</code></div>'
+    + '<label for="cid">Client ID</label><input id="cid" autocomplete="off" autocapitalize="off" spellcheck="false">'
+    + '<label for="csec">Client secret</label><input id="csec" type="password" autocomplete="off">'
+    + '<button id="go">Connect</button>';
+
+  document.getElementById('go').onclick = function() {
+    var client_id = document.getElementById('cid').value.trim();
+    var client_secret = document.getElementById('csec').value.trim();
+
+    if (!client_id || !client_secret) return show_error('Both fields are required.');
+
+    var verifier = random_string();
+    var state = random_string();
+
+    challenge(verifier).then(function(code_challenge) {
+      sessionStorage.setItem(STASH, JSON.stringify({
+        client_id: client_id,
+        client_secret: client_secret,
+        verifier: verifier,
+        state: state
+      }));
+
+      location.assign(AUTHORIZE + '?' + form_body({
+        response_type: 'code',
+        client_id: client_id,
+        redirect_uri: REDIRECT_URI,
+        scope: SCOPE,
+        state: state,
+        code_challenge: code_challenge,
+        code_challenge_method: 'S256'
+      }));
+    }).catch(function() {
+      show_error('This browser cannot compute the PKCE challenge. It must be an HTTPS page.');
+    });
+  };
+}
+
+// -- step 2: exchange the code ----------------------------------------------
+
+function exchange(code, state) {
+  var pending;
+  try {
+    pending = JSON.parse(sessionStorage.getItem(STASH));
+  } catch (e) {
+    pending = null;
+  }
+
+  if (!pending) return show_error('Setup was interrupted. Start again.');
+  if (pending.state !== state) return show_error('State mismatch. Start again.');
+
+  app.innerHTML = '<h1>Connecting…</h1>';
+
+  fetch(TOKEN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form_body({
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: REDIRECT_URI,
+      client_id: pending.client_id,
+      client_secret: pending.client_secret,
+      code_verifier: pending.verifier
+    })
+  }).then(function(res) {
+    return res.json().then(function(body) { return { status: res.status, body: body }; });
+  }).then(function(res) {
+    if (res.status !== 200 || !res.body.refresh_token) {
+      return show_error('FacileThings rejected the exchange.', res.body.error_description || res.body.error || res.status);
+    }
+
+    var data = {
+      client_id: pending.client_id,
+      client_secret: pending.client_secret,
+      refresh_token: res.body.refresh_token,
+      access_token: res.body.access_token,
+      expires_at: Date.now() + (res.body.expires_in || 0) * 1000
+    };
+
+    sessionStorage.removeItem(STASH);   // do not leave the secret in the browser
+    finish(data);
+  }).catch(function() {
+    sessionStorage.removeItem(STASH);
+    show_error('Could not reach FacileThings.');
+  });
+}
+
+// -- entry ------------------------------------------------------------------
+
+var error = query('error');
+var code = query('code');
+
+if (error) {
+  sessionStorage.removeItem(STASH);
+  show_error('Authorization was refused.', query('error_description') || error);
+} else if (code) {
+  exchange(code, query('state'));
+} else {
+  show_form();
+}
+</script>
+</body>
+</html>

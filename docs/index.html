@@ -63,12 +63,33 @@ function query(name) {
   return new URLSearchParams(location.search).get(name);
 }
 
-function show_error(message, detail) {
-  app.innerHTML = '<h1>Setup failed</h1>'
-    + '<div class="msg err">' + message + (detail ? '<br><code>' + detail + '</code></div>' : '</div>')
-    + '<button id="again">Start over</button>';
+function el(tag, text, cls) {
+  var node = document.createElement(tag);
 
-  document.getElementById('again').onclick = function() { location.replace(REDIRECT_URI); };
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;   // never innerHTML: detail is attacker supplied
+
+  return node;
+}
+
+// `detail` can come from the query string or from the token endpoint, so it is
+// set as text. Building this with innerHTML would be a script injection into
+// the page that holds the PKCE verifier and the user's tokens.
+function show_error(message, detail) {
+  var box = el('div', message, 'msg err');
+
+  if (detail) {
+    box.appendChild(document.createElement('br'));
+    box.appendChild(el('code', detail));
+  }
+
+  var again = el('button', 'Start over');
+  again.onclick = function() { location.replace(REDIRECT_URI); };
+
+  app.textContent = '';
+  app.appendChild(el('h1', 'Setup failed'));
+  app.appendChild(box);
+  app.appendChild(again);
 }
 
 function finish(data) {

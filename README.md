@@ -33,7 +33,24 @@ stores the result on the phone.
 4. On the phone, open the app's settings, enter client id and secret, and
    authorize. Tokens are stored on the phone and never reach the watch.
 
-## Finding the registered redirect URI
+## Getting a refresh token
+
+A personal-use client takes the password grant, which needs no redirect URI and
+no hosted page:
+
+```
+python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --password
+```
+
+It asks for your FacileThings email and password, uses them once, and prints a
+refresh token. Only the refresh token, client id and secret go on the phone.
+
+The metadata at `/.well-known/oauth-authorization-server` advertises only
+`authorization_code` and `refresh_token`, but the password grant is accepted: an
+unsupported grant returns `unsupported_grant_type`, while `password` gets as far
+as client authentication.
+
+## PKCE clients only: finding the registered redirect URI
 
 FacileThings sets the redirect URI when it issues the client. `/oauth/applications`
 is 403 and there is no developer dashboard, so it cannot be changed from here.

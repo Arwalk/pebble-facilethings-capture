@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""One-shot FacileThings authorization.
+"""One-shot FacileThings authorization. Prints a refresh token to paste into
+the watchapp's settings.
 
-FacileThings v2 grants only authorization_code and refresh_token (PKCE S256),
-so a browser has to log you in once. This does that and prints the refresh
-token to paste into the watchapp's settings.
+  password, for a personal-use client (no redirect uri, no hosted page):
+      python3 tools/ft_auth.py --client-id ID --client-secret SECRET --password
+
+The rest are for a PKCE client, where a browser has to log you in once.
 
   loopback (needs http://127.0.0.1:8765/callback registered on your client):
       python3 tools/ft_auth.py --client-id ID --client-secret SECRET
@@ -20,6 +22,7 @@ import base64
 import hashlib
 import http.server
 import json
+import getpass
 import secrets
 import threading
 import urllib.parse
@@ -59,17 +62,8 @@ def authorize_url(client_id, redirect_uri, challenge, state):
     })
 
 
-def exchange(client_id, client_secret, code, redirect_uri, verifier):
-    body = urllib.parse.urlencode({
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': redirect_uri,
-        'client_id': client_id,
-        'client_secret': client_secret,
-        'code_verifier': verifier,
-    }).encode()
-
-    req = urllib.request.Request(TOKEN, data=body, method='POST')
+def post_token(params):
+    req = urllib.request.Request(TOKEN, data=urllib.parse.urlencode(params).encode(), method='POST')
     req.add_header('Content-Type', 'application/x-www-form-urlencoded')
 
     try:
@@ -81,6 +75,29 @@ def exchange(client_id, client_secret, code, redirect_uri, verifier):
             return e.code, json.loads(raw)
         except ValueError:
             return e.code, {'error': raw.decode('utf8', 'ignore')[:400]}
+
+
+def exchange(client_id, client_secret, code, redirect_uri, verifier):
+    return post_token({
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'code_verifier': verifier,
+    })
+
+
+# Personal-use clients accept the password grant, which needs no redirect uri.
+def by_password(client_id, client_secret, username, password):
+    return post_token({
+        'grant_type': 'password',
+        'username': username,
+        'password': password,
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'scope': SCOPE,
+    })
 
 
 # -- loopback ---------------------------------------------------------------
@@ -126,10 +143,21 @@ def probe(client_id):
         print('%s:\n  %s\n' % (name, authorize_url(client_id, uri, challenge, 'probe')))
 
 
+def report_token(status, body):
+    if status != HTTP_OK or 'refresh_token' not in body:
+        raise SystemExit('failed (%s): %s'
+                         % (status, body.get('error_description') or body.get('error') or body))
+
+    print('\nrefresh_token:\n\n  %s\n' % body['refresh_token'])
+    print('Paste it, with your client id and secret, into the watchapp settings.')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--client-id', required=True)
     ap.add_argument('--client-secret')
+    ap.add_argument('--password', action='store_true',
+                    help='personal-use client: sign in directly, no redirect uri')
     ap.add_argument('--oob', action='store_true', help='paste the code by hand')
     ap.add_argument('--probe', action='store_true', help='only print URLs to try')
     args = ap.parse_args()
@@ -140,6 +168,14 @@ def main():
 
     if not args.client_secret:
         ap.error('--client-secret is required unless --probe')
+
+    if args.password:
+        # Prompted, never passed on the command line, so it stays out of history.
+        username = input('FacileThings email: ').strip()
+        status, body = by_password(args.client_id, args.client_secret,
+                                   username, getpass.getpass('Password: '))
+        report_token(status, body)
+        return
 
     verifier, challenge = make_pkce()
     state = secrets.token_urlsafe(16)
@@ -164,14 +200,7 @@ def main():
     if not code:
         raise SystemExit('no code received')
 
-    status, body = exchange(args.client_id, args.client_secret, code, redirect_uri, verifier)
-
-    if status != HTTP_OK or 'refresh_token' not in body:
-        raise SystemExit('exchange failed (%s): %s'
-                         % (status, body.get('error_description') or body.get('error') or body))
-
-    print('\nrefresh_token:\n\n  %s\n' % body['refresh_token'])
-    print('Paste it, with your client id and secret, into the watchapp settings.')
+    report_token(*exchange(args.client_id, args.client_secret, code, redirect_uri, verifier))
 
 
 if __name__ == '__main__':

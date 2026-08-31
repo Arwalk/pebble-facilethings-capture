@@ -33,6 +33,28 @@ stores the result on the phone.
 4. On the phone, open the app's settings, enter client id and secret, and
    authorize. Tokens are stored on the phone and never reach the watch.
 
+## Finding the registered redirect URI
+
+FacileThings sets the redirect URI when it issues the client. `/oauth/applications`
+is 403 and there is no developer dashboard, so it cannot be changed from here.
+To see which one your client accepts:
+
+```
+python3 tools/ft_auth.py --client-id <ID> --probe
+```
+
+Log in first, then open each printed URL. The one that shows a consent screen is
+the registered one; the others report an invalid redirect URI.
+
+If it is loopback or out-of-band, skip the hosted page entirely:
+
+```
+python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET>        # loopback
+python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --oob  # paste the code
+```
+
+Either prints a refresh token for the watchapp settings.
+
 ## Build
 
 ```

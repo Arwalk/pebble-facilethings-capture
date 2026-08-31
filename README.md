@@ -11,68 +11,38 @@ capture/            watchapp
   src/c/            ui -> capture -> msg (AppMessage driver)
   src/pkjs/         index -> ft_client -> {http, config}
   test/run.js       pkjs tests against stubbed XHR/localStorage/Pebble
-docs/index.html     hosted OAuth config page (GitHub Pages)
+tools/ft_auth.py    one-shot sign in, prints a refresh token
 ```
 
 ## Setup
 
-FacileThings v2 has no static API key. It supports `authorization_code` and
-`refresh_token` only, with PKCE S256. The config page runs that flow once and
-stores the result on the phone.
+FacileThings v2 has no static API key. A personal-use client authenticates with
+the password grant, which needs no redirect URI and nothing hosted.
 
-1. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
-   The page is then served at
+1. Get a refresh token, once, on your computer:
 
-       https://arwalk.github.io/pebble-facilethings-capture/
+   ```
+   python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --password
+   ```
 
-2. Register that exact string as a `redirect_uri` on your FacileThings OAuth
-   client. Doorkeeper matches it exactly, and the host is lowercase. The page
-   also prints the URI it needs, so open it once if in doubt.
-3. `PAGE_URL` in `capture/src/pkjs/config.js` already holds that URL. Change it
-   only if you host the page elsewhere.
-4. On the phone, open the app's settings, enter client id and secret, and
-   authorize. Tokens are stored on the phone and never reach the watch.
+   It asks for your FacileThings email and password, uses them for that one
+   request, and prints a refresh token.
 
-## Getting a refresh token
+2. On the phone, open the app's settings and enter the client id, the client
+   secret and the refresh token. A blank field keeps what is already stored, so
+   the secret is typed once.
 
-A personal-use client takes the password grant, which needs no redirect URI and
-no hosted page:
+Your password is never stored. The three saved values live in phone
+localStorage and never reach the watch.
 
-```
-python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --password
-```
+`/.well-known/oauth-authorization-server` advertises only `authorization_code`
+and `refresh_token`, but the password grant is accepted: an unsupported grant is
+rejected as `unsupported_grant_type`, while `password` gets as far as client
+authentication.
 
-It asks for your FacileThings email and password, uses them once, and prints a
-refresh token. Only the refresh token, client id and secret go on the phone.
-
-The metadata at `/.well-known/oauth-authorization-server` advertises only
-`authorization_code` and `refresh_token`, but the password grant is accepted: an
-unsupported grant returns `unsupported_grant_type`, while `password` gets as far
-as client authentication.
-
-## PKCE clients only: finding the registered redirect URI
-
-FacileThings sets the redirect URI when it issues the client. `/oauth/applications`
-is 403 and there is no developer dashboard, so it cannot be changed from here.
-To see which one your client accepts:
-
-```
-python3 tools/ft_auth.py --client-id <ID> --probe
-```
-
-Open each printed URL directly. Each sends you to the sign in page and resumes
-after. Do not visit `/oauth/login` on its own; it has no pending request and
-fails with `missing_param`. The URL that reaches a consent screen carries the
-registered redirect URI; the others report an invalid one.
-
-If it is loopback or out-of-band, skip the hosted page entirely:
-
-```
-python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET>        # loopback
-python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --oob  # paste the code
-```
-
-Either prints a refresh token for the watchapp settings.
+If you ever need a PKCE client instead (only if other people sign in with their
+own accounts), `ft_auth.py --probe` prints authorize URLs to find which redirect
+URI is registered, and `--oob` completes that flow by hand.
 
 ## Build
 

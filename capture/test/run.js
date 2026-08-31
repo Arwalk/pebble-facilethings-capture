@@ -321,70 +321,46 @@ test('ready announces itself to the watch', function() {
   assert.deepStrictEqual(sent, [{ Ready: 1 }]);
 });
 
-test('showConfiguration opens a self-contained page', function() {
+test('showConfiguration opens the hosted sign in page', function() {
   reset_globals(function() { return { status: 201, body: {} }; });
-  seed(full_config());
   load('index');
 
   Pebble.fire('showConfiguration', {});
 
   assert.strictEqual(sent.length, 1);
-
-  var url = sent[0].openURL;
-  assert.ok(/^data:text\/html/.test(url), 'must be a data URI: ' + url.slice(0, 40));
-
-  var html = decodeURIComponent(url.replace(/^data:text\/html;charset=utf-8,/, ''));
-  assert.ok(html.indexOf('cid-1') !== -1, 'client id should be prefilled');
-  assert.ok(html.indexOf(SECRET) === -1, 'secret must never enter the page');
-  assert.ok(html.indexOf(REFRESH) === -1, 'refresh token must never enter the page');
-});
-
-test('a client id with quotes cannot break out of the page', function() {
-  reset_globals(function() { return { status: 201, body: {} }; });
-  seed(full_config({ client_id: '"><script>bad()<\/script>' }));
-  load('index');
-
-  Pebble.fire('showConfiguration', {});
-
-  var html = decodeURIComponent(sent[0].openURL.replace(/^data:text\/html;charset=utf-8,/, ''));
-  assert.ok(html.indexOf('<script>bad()') === -1, 'must be escaped: ' + html);
+  assert.ok(/^https:\/\//.test(sent[0].openURL), 'must be https: ' + sent[0].openURL);
 });
 
 test('webviewclosed stores the credential set', function() {
   reset_globals(function() { return { status: 201, body: {} }; });
   load('index');
 
-  var payload = { client_id: 'cid-1', client_secret: SECRET, refresh_token: REFRESH };
-  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify(payload)) });
-
-  assert.strictEqual(load('config').get().refresh_token, REFRESH);
-});
-
-test('blank fields keep the stored values', function() {
-  reset_globals(function() { return { status: 201, body: {} }; });
-  seed(full_config());
-  load('index');
-
-  var payload = { client_id: 'cid-2', client_secret: '', refresh_token: '' };
+  var payload = { client_id: 'cid-1', refresh_token: REFRESH,
+                  access_token: ACCESS, expires_at: Date.now() + 3600000 };
   Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify(payload)) });
 
   var cfg = load('config').get();
-  assert.strictEqual(cfg.client_id, 'cid-2', 'a filled field is applied');
-  assert.strictEqual(cfg.client_secret, SECRET, 'a blank field keeps the stored secret');
-  assert.strictEqual(cfg.refresh_token, REFRESH, 'a blank field keeps the stored token');
+  assert.strictEqual(cfg.refresh_token, REFRESH);
+  assert.ok(!cfg.client_secret, 'a public client stores no secret');
 });
 
-test('saving drops the cached access token', function() {
-  reset_globals(function() { return { status: 201, body: {} }; });
-  seed(full_config());
-  load('index');
+test('a public client captures without sending a secret', function() {
+  reset_globals(function(req) {
+    if (req.url.indexOf('/oauth/token') !== -1) {
+      return { status: 200, body: { access_token: 'a2', expires_in: 7200 } };
+    }
+    return { status: 201, body: {} };
+  });
+  seed({ client_id: 'cid-1', refresh_token: REFRESH, expires_at: 0 });
 
-  var payload = { client_id: 'cid-1', client_secret: SECRET, refresh_token: 'refresh-new' };
-  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify(payload)) });
+  var result = 'unset';
+  load('ft_client').capture('note', function(kind) { result = kind; });
 
-  var cfg = load('config').get();
-  assert.strictEqual(cfg.refresh_token, 'refresh-new');
-  assert.ok(!cfg.access_token, 'a stale access token must not survive a new refresh token');
+  assert.strictEqual(result, null, 'capture should succeed with no secret');
+
+  var form = form_of(requests[0]);
+  assert.strictEqual(form.grant_type, 'refresh_token');
+  assert.ok(!('client_secret' in form), 'must not send client_secret: ' + requests[0].body);
 });
 
 test('an incomplete webview response is rejected', function() {

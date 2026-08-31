@@ -16,33 +16,33 @@ tools/ft_auth.py    one-shot sign in, prints a refresh token
 
 ## Setup
 
-FacileThings v2 has no static API key. A personal-use client authenticates with
-the password grant, which needs no redirect URI and nothing hosted.
+FacileThings v2 has no static API key. It grants only `authorization_code` and
+`refresh_token`, with PKCE S256. The app is distributed, so it uses a **public**
+client: there is no client secret, and PKCE is what replaces it.
 
-1. Get a refresh token, once, on your computer:
+1. Ask FacileThings for a public PKCE client (`token_endpoint_auth_method: none`)
+   with redirect URI `https://arwalk.github.io/pebble-facilethings-capture/` and
+   scope `user`. They set the redirect URI; `/oauth/applications` is 403 and there
+   is no developer dashboard, so it cannot be changed later without asking.
+2. Put the client id in `CLIENT_ID` at the top of `docs/index.html`.
+3. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
+   The URL must match `PAGE_URL` in `capture/src/pkjs/config.js` and the
+   registered redirect URI, exactly.
+4. On the phone: app settings > **Connect FacileThings** > sign in. That is the
+   whole setup for a user.
 
-   ```
-   python3 tools/ft_auth.py --client-id <ID> --client-secret <SECRET> --password
-   ```
+Tokens live in phone localStorage and never reach the watch. Nothing is typed by
+hand and no secret exists to leak.
 
-   It asks for your FacileThings email and password, uses them for that one
-   request, and prints a refresh token.
+To check which redirect URI a client actually accepts:
 
-2. On the phone, open the app's settings and enter the client id, the client
-   secret and the refresh token. A blank field keeps what is already stored, so
-   the secret is typed once.
+```
+python3 tools/ft_auth.py --client-id <ID> --probe
+```
 
-Your password is never stored. The three saved values live in phone
-localStorage and never reach the watch.
-
-`/.well-known/oauth-authorization-server` advertises only `authorization_code`
-and `refresh_token`, but the password grant is accepted: an unsupported grant is
-rejected as `unsupported_grant_type`, while `password` gets as far as client
-authentication.
-
-If you ever need a PKCE client instead (only if other people sign in with their
-own accounts), `ft_auth.py --probe` prints authorize URLs to find which redirect
-URI is registered, and `--oob` completes that flow by hand.
+Open each printed URL directly; the one that reaches a consent screen is the
+registered one. `/oauth/login` on its own has no pending request and fails with
+`missing_param`.
 
 ## Build
 

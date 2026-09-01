@@ -11,7 +11,7 @@ var SECRET = 'sekret-value';
 var REFRESH = 'refresh-1';
 var ACCESS = 'access-1';
 
-var requests, logs, sent;
+var requests, logs, sent, pending;
 
 // Kept before the stub replaces global.console.
 var report = console.log.bind(console);
@@ -20,6 +20,7 @@ function reset_globals(responder) {
   requests = [];
   logs = [];
   sent = [];
+  pending = [];
 
   var store = {};
   global.localStorage = {
@@ -45,18 +46,26 @@ function reset_globals(responder) {
     self.open = function(method, url) { self._method = method; self._url = url; };
     self.setRequestHeader = function(k, v) { self._headers[k] = v; };
 
-    self.send = function(body) {
-      var req = { method: self._method, url: self._url, headers: self._headers, body: body };
-      requests.push(req);
-
-      var res = responder(req, requests.length - 1);
-
+    function deliver(res) {
       if (res.network) return self.onerror();
       if (res.timeout) return self.ontimeout();
 
       self.status = res.status;
       self.responseText = JSON.stringify(res.body === undefined ? {} : res.body);
       self.onload();
+    }
+
+    self.send = function(body) {
+      var req = { method: self._method, url: self._url, headers: self._headers, body: body };
+      requests.push(req);
+
+      var res = responder(req, requests.length - 1);
+
+      // A responder can hold a request open, so a test can act while it is in
+      // flight. pending[i](res) then completes it.
+      if (res.defer) return pending.push(deliver);
+
+      deliver(res);
     };
   };
 
@@ -328,6 +337,26 @@ test('a reused id carrying different text is captured, not swallowed', function(
   assert.strictEqual(requests.length, 2,
                      'a different capture must reach FacileThings, not be acked as a duplicate');
   assert.strictEqual(body_of(requests[1]).text, 'buy milk on the way home');
+});
+
+// The watch resends an item whose AppMessage was not acknowledged at the
+// bluetooth layer, which is not the same as the phone never receiving it. Until
+// the POST comes back the capture is not in the seen list yet, so a resend
+// arriving in that window would file the note a second time.
+test('a resend while the post is in flight does not file the note twice', function() {
+  reset_globals(function() { return { defer: true }; });
+  seed(full_config());
+  load('index');
+
+  var payload = { payload: { Id: 3, Text: 'acheter du pain' } };
+  Pebble.fire('appmessage', payload);
+  Pebble.fire('appmessage', payload);
+
+  assert.strictEqual(requests.length, 1, 'the second send must not post again');
+
+  pending[0]({ status: 201, body: {} });
+
+  assert.deepStrictEqual(sent, [{ Id: 3, Ack: 1 }]);
 });
 
 test('failures map onto the MsgErr wire codes', function() {

@@ -60,11 +60,23 @@ static void report(CaptureState s) {
 // -- queue ------------------------------------------------------------------
 
 static int q_count(void) {
-  return persist_exists(PERSIST_KEY_COUNT) ? persist_read_int(PERSIST_KEY_COUNT) : 0;
+  int n = persist_exists(PERSIST_KEY_COUNT) ? persist_read_int(PERSIST_KEY_COUNT) : 0;
+
+  // A corrupt count would index outside the slot keys, over the queue's own.
+  if (n < 0 || n > QUEUE_MAX) return 0;
+
+  return n;
 }
 
 static bool q_get(int slot, QueueItem *item) {
-  return persist_read_data(PERSIST_KEY_ITEM_BASE + slot, item, sizeof(*item)) == (int)sizeof(*item);
+  if (persist_read_data(PERSIST_KEY_ITEM_BASE + slot, item, sizeof(*item)) != (int)sizeof(*item)) {
+    return false;
+  }
+
+  // A record written under another layout need not be terminated, and the text
+  // goes straight to dict_write_cstring.
+  item->text[QUEUE_TEXT_SIZE - 1] = '\0';
+  return true;
 }
 
 // Seeded from the clock, not from 1: removing the app wipes persist, and the
@@ -148,14 +160,14 @@ static void retry_or_queue(void) {
 
 static void flush(void) {
   if (s_inflight_id != 0) return;
-  if (q_count() == 0) return;
 
   QueueItem item;
-  if (!q_get(0, &item)) {
-    q_pop();       // unreadable slot, drop it rather than wedge the queue
-    flush();
-    return;
-  }
+
+  // Drop unreadable slots rather than wedge the queue. A loop, not recursion:
+  // every frame would carry a whole item.
+  while (q_count() > 0 && !q_get(0, &item)) q_pop();
+
+  if (q_count() == 0) return;
 
   s_attempts++;
   APP_LOG(APP_LOG_LEVEL_INFO, "send id=%u queued=%d attempt=%d",

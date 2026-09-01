@@ -15,6 +15,11 @@ ERR_CODE[ft.Kind_Auth] = Err_Auth;
 ERR_CODE[ft.Kind_Api] = Err_Api;
 ERR_CODE[ft.Kind_NoConfig] = Err_NoConfig;
 
+// Captures posted but not yet answered. The watch resends an item whose
+// AppMessage went unacknowledged at the bluetooth layer, which does not mean the
+// phone missed it; the seen list only closes that window once the POST returns.
+var inflight = {};
+
 function ack(id) {
   Pebble.sendAppMessage({ Id: id, Ack: 1 });
 }
@@ -35,10 +40,14 @@ Pebble.addEventListener('appmessage', function(e) {
 
   // Its ack was lost, not its capture. Re-ack instead of capturing twice.
   if (config.seen(id, text)) return ack(id);
+  if (inflight[id]) return;
 
   console.log('POST /v2/stuff id=' + id);
+  inflight[id] = true;
 
   ft.capture(text, function(kind) {
+    delete inflight[id];
+
     if (kind) return fail(id, kind);
 
     config.remember(id, text);

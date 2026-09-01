@@ -5,31 +5,43 @@
 
 static MsgHandlers s_handlers;
 
+// value->int32 reads four bytes whatever the tuple actually holds, so a shorter
+// or non-integer one would be read past its end.
+static bool int_value(const Tuple *t, uint32_t *out) {
+  if (!t) return false;
+  if (t->type != TUPLE_INT && t->type != TUPLE_UINT) return false;
+
+  switch (t->length) {
+    case 1: *out = t->value->uint8; return true;
+    case 2: *out = t->value->uint16; return true;
+    case 4: *out = t->value->uint32; return true;
+    default: return false;
+  }
+}
+
 static void inbox_received(DictionaryIterator *iter, void *context) {
   if (dict_find(iter, MESSAGE_KEY_Ready)) {
     if (s_handlers.ready) s_handlers.ready();
     return;
   }
 
-  Tuple *id_t = dict_find(iter, MESSAGE_KEY_Id);
-  if (!id_t) return;
-
-  uint32_t id = (uint32_t)id_t->value->int32;
+  uint32_t id;
+  if (!int_value(dict_find(iter, MESSAGE_KEY_Id), &id)) return;
 
   if (dict_find(iter, MESSAGE_KEY_Ack)) {
     if (s_handlers.ack) s_handlers.ack(id);
     return;
   }
 
-  Tuple *err_t = dict_find(iter, MESSAGE_KEY_Err);
-  if (!err_t) return;
+  uint32_t err;
+  if (!int_value(dict_find(iter, MESSAGE_KEY_Err), &err)) return;
 
-  if (s_handlers.err) s_handlers.err(id, (MsgErr)err_t->value->int32);
+  if (s_handlers.err) s_handlers.err(id, (MsgErr)err);
 }
 
 static void outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
-  Tuple *id_t = dict_find(iter, MESSAGE_KEY_Id);
-  uint32_t id = id_t ? (uint32_t)id_t->value->int32 : 0;
+  uint32_t id;
+  if (!int_value(dict_find(iter, MESSAGE_KEY_Id), &id)) id = 0;
 
   if (s_handlers.send_fail) s_handlers.send_fail(id);
 }

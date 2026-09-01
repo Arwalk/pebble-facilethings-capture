@@ -35,7 +35,20 @@ function update(patch) {
   put(cfg);
 }
 
-// Ids of items FacileThings already accepted. Guards the window where a 201 is
+// A capture is identified by its id and its text together. Watch persist holds
+// the id counter and is wiped when the app is removed, so ids restart at 1 while
+// this list survives; on the id alone a new capture reusing an old id would be
+// acked as a duplicate and never sent. The text is hashed rather than kept:
+// these are the user's notes.
+function key(id, text) {
+  var h = 5381;
+
+  for (var i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+
+  return id + ':' + h.toString(36);
+}
+
+// Captures FacileThings already accepted. Guards the window where a 201 is
 // followed by a lost ack, which would otherwise capture the item twice.
 function seen_ids() {
   try {
@@ -45,13 +58,13 @@ function seen_ids() {
   }
 }
 
-function seen(id) {
-  return seen_ids().indexOf(id) !== -1;
+function seen(id, text) {
+  return seen_ids().indexOf(key(id, text)) !== -1;
 }
 
-function remember(id) {
+function remember(id, text) {
   var ids = seen_ids();
-  ids.push(id);
+  ids.push(key(id, text));
 
   localStorage.setItem(KEY_SEEN, JSON.stringify(ids.slice(-SEEN_MAX)));
 }
@@ -89,6 +102,9 @@ function save(data) {
     access_token: data.access_token,
     expires_at: data.expires_at
   });
+
+  // The account may not be the one the remembered captures went to.
+  localStorage.removeItem(KEY_SEEN);
 
   console.log('config: saved');
 }

@@ -67,8 +67,12 @@ static bool q_get(int slot, QueueItem *item) {
   return persist_read_data(PERSIST_KEY_ITEM_BASE + slot, item, sizeof(*item)) == (int)sizeof(*item);
 }
 
+// Seeded from the clock, not from 1: removing the app wipes persist, and the
+// phone remembers the captures it already sent. Restarting the count would hand
+// a new capture an id the phone still holds.
 static uint32_t next_id(void) {
-  uint32_t id = persist_exists(PERSIST_KEY_NEXT_ID) ? (uint32_t)persist_read_int(PERSIST_KEY_NEXT_ID) : 1;
+  uint32_t id = persist_exists(PERSIST_KEY_NEXT_ID) ? (uint32_t)persist_read_int(PERSIST_KEY_NEXT_ID)
+                                                    : (uint32_t)time(NULL);
 
   persist_write_int(PERSIST_KEY_NEXT_ID, (int32_t)(id + 1));
   return id;
@@ -83,7 +87,10 @@ static uint32_t q_push(const char *text) {
   strncpy(item.text, text, QUEUE_TEXT_SIZE - 1);
   item.text[QUEUE_TEXT_SIZE - 1] = '\0';
 
-  persist_write_data(PERSIST_KEY_ITEM_BASE + n, &item, sizeof(item));
+  // Counting an item that was not written would report it queued and then drop
+  // it silently on the next flush.
+  if (persist_write_data(PERSIST_KEY_ITEM_BASE + n, &item, sizeof(item)) != (int)sizeof(item)) return 0;
+
   persist_write_int(PERSIST_KEY_COUNT, n + 1);
   return item.id;
 }

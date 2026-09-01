@@ -276,7 +276,22 @@ test('success acks and remembers the id', function() {
   Pebble.fire('appmessage', { payload: { Id: 7, Text: 'acheter du pain' } });
 
   assert.deepStrictEqual(sent, [{ Id: 7, Ack: 1 }]);
-  assert.ok(load('config').seen(7), 'id should be remembered');
+  assert.ok(load('config').seen(7, 'acheter du pain'), 'the capture should be remembered');
+});
+
+// Signing in again may be a different account, and the remembered captures went
+// to the old one.
+test('a new sign in forgets the captures of the old account', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  var config = seed(full_config());
+  config.remember(7, 'acheter du pain');
+  load('index');
+
+  var payload = { client_id: 'cid-2', refresh_token: 'refresh-2',
+                  access_token: 'access-2', expires_at: Date.now() + 3600000 };
+  Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify(payload)) });
+
+  assert.ok(!config.seen(7, 'acheter du pain'), 'captures from the old account must not persist');
 });
 
 test('a repeated id re-acks without posting again', function() {
@@ -291,6 +306,28 @@ test('a repeated id re-acks without posting again', function() {
 
   assert.strictEqual(requests.length, after_first, 'must not post twice');
   assert.deepStrictEqual(sent, [{ Id: 7, Ack: 1 }, { Id: 7, Ack: 1 }]);
+});
+
+// SECURITY REVIEW: watch persist (and with it the id counter) is wiped when the
+// app is removed from the watch, so ids restart at 1 on a reinstall, while
+// ft_seen in phone localStorage survives. A different capture that happens to
+// reuse an old id is then silently acked and never posted: the watch shows
+// "Captured", pops the item from its queue, and the note is gone. The dedup key
+// must distinguish a resend of the same capture from a new capture reusing an id.
+test('a reused id carrying different text is captured, not swallowed', function() {
+  reset_globals(function() { return { status: 201, body: {} }; });
+  seed(full_config());
+  load('index');
+
+  Pebble.fire('appmessage', { payload: { Id: 1, Text: 'call the dentist' } });
+  assert.strictEqual(requests.length, 1, 'the first capture should be posted');
+
+  // Same id, different dictation: the watch was reinstalled and restarted at 1.
+  Pebble.fire('appmessage', { payload: { Id: 1, Text: 'buy milk on the way home' } });
+
+  assert.strictEqual(requests.length, 2,
+                     'a different capture must reach FacileThings, not be acked as a duplicate');
+  assert.strictEqual(body_of(requests[1]).text, 'buy milk on the way home');
 });
 
 test('failures map onto the MsgErr wire codes', function() {
@@ -395,12 +432,12 @@ test('disconnect forgets the token even when revoke fails', function() {
 test('disconnect clears the captured-id history', function() {
   reset_globals(function() { return { status: 200, body: {} }; });
   var config = seed({ client_id: 'cid-1', refresh_token: REFRESH });
-  config.remember(7);
+  config.remember(7, 'acheter du pain');
   load('index');
 
   Pebble.fire('webviewclosed', { response: encodeURIComponent(JSON.stringify({ disconnect: true })) });
 
-  assert.ok(!config.seen(7), 'ids from the old account must not persist');
+  assert.ok(!config.seen(7, 'acheter du pain'), 'captures from the old account must not persist');
 });
 
 test('the page is told whether an account is connected', function() {

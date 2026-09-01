@@ -34,14 +34,14 @@ Pebble.addEventListener('appmessage', function(e) {
   if (id === undefined || text === undefined) return;
 
   // Its ack was lost, not its capture. Re-ack instead of capturing twice.
-  if (config.seen(id)) return ack(id);
+  if (config.seen(id, text)) return ack(id);
 
   console.log('POST /v2/stuff id=' + id);
 
   ft.capture(text, function(kind) {
     if (kind) return fail(id, kind);
 
-    config.remember(id);
+    config.remember(id, text);
     ack(id);
   });
 });

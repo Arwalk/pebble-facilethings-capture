@@ -26,7 +26,7 @@
 // This is a public client: the app is distributed, so it cannot hold a secret.
 // PKCE is what replaces it, and no client_secret is sent anywhere.
 
-var CLIENT_ID = 'YOUR-FACILETHINGS-CLIENT-ID';
+var CLIENT_ID = 'UZrDOTeetLkzfnQ1d9WCGuOmxv_5JOoadpvlMq5gqmQ';
 
 var AUTHORIZE = 'https://api2.facilethings.com/oauth/authorize';
 var TOKEN = 'https://api2.facilethings.com/oauth/token';
@@ -35,8 +35,10 @@ var SCOPE = 'user';
 var STASH = 'ft_pkce';
 var HTTP_OK = 200;
 
-// Must match the redirect_uri registered on the client, exactly.
-var REDIRECT_URI = location.origin + location.pathname;
+// Doorkeeper compares this string byte for byte with the registered value, so
+// it is pinned rather than derived: GitHub Pages serves this page at the URL
+// with a trailing slash, which would not match.
+var REDIRECT_URI = 'https://arwalk.github.io/pebble-facilethings-capture';
 
 var app = document.getElementById('app');
 

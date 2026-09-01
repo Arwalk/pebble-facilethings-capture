@@ -22,15 +22,15 @@ FacileThings v2 has no static API key. It grants only `authorization_code` and
 `refresh_token`, with PKCE S256. The app is distributed, so it uses a **public**
 client: there is no client secret, and PKCE is what replaces it.
 
-1. Ask FacileThings for a public PKCE client (`token_endpoint_auth_method: none`)
-   with redirect URI `https://arwalk.github.io/pebble-facilethings-capture/` and
-   scope `user`. They set the redirect URI; `/oauth/applications` is 403 and there
-   is no developer dashboard, so it cannot be changed later without asking.
-2. Put the client id in `CLIENT_ID` at the top of `docs/index.html`.
-3. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
-   The URL must match `PAGE_URL` in `capture/src/pkjs/config.js` and the
-   registered redirect URI, exactly.
-4. On the phone: app settings > **Connect FacileThings** > sign in. That is the
+The client is registered. `CLIENT_ID` and `REDIRECT_URI` in `docs/index.html`
+hold the issued values; neither is a secret. Doorkeeper compares `redirect_uri`
+byte for byte, and the registered value has **no trailing slash**, so it is
+pinned as a constant rather than read from `location`. FacileThings sets the
+redirect URIs: `/oauth/applications` is 403 and there is no developer dashboard,
+so they cannot be changed without asking.
+
+1. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
+2. On the phone: app settings > **Connect FacileThings** > sign in. That is the
    whole setup for a user.
 
 To sign out, open the settings again and press **Disconnect**. It revokes the

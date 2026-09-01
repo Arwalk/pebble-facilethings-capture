@@ -48,7 +48,8 @@ function load_page(search) {
       createElement: node
     },
     location: { origin: 'https://example.test', pathname: '/p/', search: search || '',
-                replace: function(u) { sandbox.replaced = u; }, assign: function() {} },
+                replace: function(u) { sandbox.replaced = u; },
+                assign: function(u) { sandbox.assigned = u; } },
     sessionStorage: { getItem: function() { return null; }, setItem: function() {},
                       removeItem: function() {} },
     crypto: { getRandomValues: function(a) { return a; },
@@ -116,19 +117,27 @@ function find_button(root, label) {
   return null;
 }
 
-// The page refuses to start while CLIENT_ID is the placeholder, so give it one
-// and render again.
+// Nothing renders until the entry point runs, and the shipped page only reaches
+// it on load.
 function rendered(search) {
   var page = load_page(search);
 
-  page.sandbox.CLIENT_ID = 'test-client-id';
   page.sandbox.show_start();
-
   return page;
 }
 
+test('the shipped page carries a real client id', function() {
+  var page = load_page('');
+
+  assert.ok(page.sandbox.CLIENT_ID.indexOf('YOUR-') !== 0,
+            'CLIENT_ID is still the placeholder');
+});
+
 test('the placeholder client id stops the flow', function() {
   var page = load_page('');
+
+  page.sandbox.CLIENT_ID = 'YOUR-FACILETHINGS-CLIENT-ID';
+  page.sandbox.show_start();
 
   assert.ok(!find_button(page.app, 'Connect FacileThings'),
             'must not offer sign in before a client id is set');
@@ -159,5 +168,29 @@ test('a fresh page offers Connect, not Disconnect', function() {
   assert.ok(!find_button(page.app, 'Disconnect'), 'Disconnect must not be shown');
 });
 
-console.log('\n' + passed + ' passed, ' + failed + ' failed');
-process.exit(failed ? 1 : 0);
+// Doorkeeper compares redirect_uri byte for byte. GitHub Pages serves the page
+// at the URL with a trailing slash, so deriving it from location would send a
+// value the client was never registered with.
+var REGISTERED = 'https://arwalk.github.io/pebble-facilethings-capture';
+
+var signing_in = rendered('');
+find_button(signing_in.app, 'Connect FacileThings').onclick();
+
+setTimeout(function() {
+  test('sign in sends the registered redirect_uri and an S256 challenge', function() {
+    var url = signing_in.sandbox.assigned;
+    assert.ok(url, 'should have navigated to the authorize endpoint');
+
+    var q = new URLSearchParams(url.split('?')[1]);
+
+    assert.strictEqual(q.get('redirect_uri'), REGISTERED);
+    assert.strictEqual(q.get('client_id'), signing_in.sandbox.CLIENT_ID);
+    assert.strictEqual(q.get('code_challenge_method'), 'S256');
+    assert.ok(q.get('code_challenge'), 'a challenge must be sent');
+    assert.ok(q.get('state'), 'a state must be sent');
+    assert.strictEqual(q.get('scope'), 'user');
+  });
+
+  console.log('\n' + passed + ' passed, ' + failed + ' failed');
+  process.exit(failed ? 1 : 0);
+}, 0);

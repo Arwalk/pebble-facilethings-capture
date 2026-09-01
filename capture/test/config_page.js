@@ -168,10 +168,9 @@ test('a fresh page offers Connect, not Disconnect', function() {
   assert.ok(!find_button(page.app, 'Disconnect'), 'Disconnect must not be shown');
 });
 
-// Doorkeeper compares redirect_uri byte for byte. GitHub Pages serves the page
-// at the URL with a trailing slash, so deriving it from location would send a
-// value the client was never registered with.
-var REGISTERED = 'https://arwalk.github.io/pebble-facilethings-capture';
+// Verified against the live authorize endpoint: the client is registered with
+// the trailing slash, and Doorkeeper rejects the form without it.
+var REGISTERED = 'https://arwalk.github.io/pebble-facilethings-capture/';
 
 var signing_in = rendered('');
 find_button(signing_in.app, 'Connect FacileThings').onclick();

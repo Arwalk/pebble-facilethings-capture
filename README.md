@@ -23,11 +23,12 @@ FacileThings v2 has no static API key. It grants only `authorization_code` and
 client: there is no client secret, and PKCE is what replaces it.
 
 The client is registered. `CLIENT_ID` and `REDIRECT_URI` in `docs/index.html`
-hold the issued values; neither is a secret. Doorkeeper compares `redirect_uri`
-byte for byte, and the registered value has **no trailing slash**, so it is
-pinned as a constant rather than read from `location`. FacileThings sets the
-redirect URIs: `/oauth/applications` is 403 and there is no developer dashboard,
-so they cannot be changed without asking.
+hold the issued values; neither is a secret. Doorkeeper matches `redirect_uri`
+as a parsed URI, so the **trailing slash is part of it**; the value is pinned as
+a constant rather than read from `location`, which would differ if the page were
+reached as `/index.html`. FacileThings sets the redirect URIs:
+`/oauth/applications` is 403 and there is no developer dashboard, so they cannot
+be changed without asking.
 
 1. Publish `docs/` with GitHub Pages (Settings > Pages > branch, folder `/docs`).
 2. On the phone: app settings > **Connect FacileThings** > sign in. That is the

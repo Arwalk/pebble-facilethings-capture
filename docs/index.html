@@ -35,10 +35,10 @@ var SCOPE = 'user';
 var STASH = 'ft_pkce';
 var HTTP_OK = 200;
 
-// Doorkeeper compares this string byte for byte with the registered value, so
-// it is pinned rather than derived: GitHub Pages serves this page at the URL
-// with a trailing slash, which would not match.
-var REDIRECT_URI = 'https://arwalk.github.io/pebble-facilethings-capture';
+// Doorkeeper compares this against the registered value as a parsed URI, so the
+// trailing slash is part of the match. Pinned rather than derived from location:
+// reaching the page as /index.html would give a path that does not match.
+var REDIRECT_URI = 'https://arwalk.github.io/pebble-facilethings-capture/';
 
 var app = document.getElementById('app');
 
